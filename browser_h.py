@@ -103,7 +103,7 @@ class Browser:
         self.scrollbar.pack(side="right", fill="y")                         # Pack the scrollbar to the right side of the window
         self.canvas.config(yscrollcommand=self.scrollbar.set)               # Link the scrollbar to the canvas
         
-        self.scroll = 0
+        #self.scroll = 0
         self.window.bind("<MouseWheel>", self.scrolldownup)                 # Bind mouse wheel scroll event to the scrolldown function
 
     def resize(self, event):                                                # Resize function to adjust the canvas size when the window is resized
@@ -129,9 +129,19 @@ class Browser:
         return text
     
     def load(self, url):
-        url_object = URL(url)                                               # Create a URL object with the provided URL to be able to parse it using functions defined in the URL class
-        body = url_object.request()                                         # Request the content of the URL
-        self.text = self.lex(body)                                          # Extract text from the HTML content using the lex function
+        if url == "about:blank":
+            self.text = ""                                                  # If the URL is about:blank, set text to empty
+            display = self.layout(self.text)
+            self.draw(display)                                              # Draw the empty layout on the canvas
+            return
+        
+        try:
+            url_object = URL(url)                                           # Create a URL object with the provided URL to be able to parse it using functions defined in the URL class
+            body = url_object.request()                                     # Request the content of the URL
+            self.text = self.lex(body)                                      # Extract text from the HTML content using the lex function
+        except Exception:
+            self.text = ""
+        
         display = self.layout(self.text)                                    # Call the layout function to get the display list
         self.draw(display)                                                  # Draw the layout on the canvas
 
@@ -172,12 +182,12 @@ class Browser:
         return self.display_list                                            # Return the list of display elements to be drawn on the canvas
     
     def draw (self, display_list):
-        current_height = self.canvas.winfo_height()                         # Get the current height of the canvas
-        
+        #current_height = self.canvas.winfo_height()                         # Get the current height of the canvas
+        self.canvas.delete("all")                                           # Clear the canvas before drawing new elements
         for x, y, c in display_list:
-            if y > self.scroll + current_height: continue                   # If the y position is below the visible area, skip drawing this character
-            if y + V_Step < self.scroll: continue                           # If the y position plus the vertical step is above the visible area, skip drawing this character
-            self.canvas.create_text(x, y - self.scroll, text=c, font=("Arial", 12))
+            #if y > self.scroll + current_height: continue                   # If the y position is below the visible area, skip drawing this character
+            #if y + V_Step < self.scroll: continue                           # If the y position plus the vertical step is above the visible area, skip drawing this character
+            self.canvas.create_text(x, y, text=c, font=("Arial", 12))
 
         bbox = self.canvas.bbox("all")                                      # Get the bounding box of all drawn elements
         if bbox:
@@ -189,16 +199,20 @@ class Browser:
     
     def scrolldownup(self, event):
         if event.delta < 0:                                                 # If scrolling down
-            self.scroll += SCROLL_STEP                                      # Increase the scroll value by the scroll step
+            self.canvas.yview_scroll(1, "units")                            # Scroll down by one unit
+            
+            '''self.scroll += SCROLL_STEP                                   # Increase the scroll value by the scroll step
             self.canvas.delete("all")                                       # Clear the canvas
             self.draw(self.display_list)                                    # Redraw the layout with the updated scroll value
+            '''
         else:                                                               # If scrolling up
+            self.canvas.yview_scroll(-1, "units")                           # Scroll up by one unit
+            
+            '''
             if self.scroll > 0:                                             # Ensure we don't scroll above the top
                 self.scroll -= SCROLL_STEP                                  # Decrease the scroll value by the scroll step
                 self.canvas.delete("all")                                   # Clear the canvas
                 self.draw(self.display_list)                                # Redraw the layout with the updated scroll value
             else:
                 return                                                      # If already at the top, do nothing
-    
-    
-    
+            '''
