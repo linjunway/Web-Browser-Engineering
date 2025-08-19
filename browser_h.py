@@ -1,6 +1,7 @@
 import socket as skt
 import ssl
 import tkinter as tk
+import os
 
 #===============================================================================================================================================#
 # Parse a URL and make HTTP requests to retrieve the content of the webpage.                                                                    #
@@ -97,7 +98,8 @@ class Browser:
         self.display_list = []                                              # Create a list to store the display elements
 
         #self.window.bind("<Down>", self.scrolldown)
-        self.window.bind("<Configure>", self.resize)                        # Bind window resize event to the resize function
+        self.resize_timer = None
+        self.window.bind("<Configure>", self.resize_debounce)               # Bind window resize event to the resize function
         
         self.scrollbar = tk.Scrollbar(self.frame, orient="vertical", command=self.canvas.yview)  # Create a vertical scrollbar
         self.scrollbar.pack(side="right", fill="y")                         # Pack the scrollbar to the right side of the window
@@ -106,15 +108,24 @@ class Browser:
         #self.scroll = 0
         self.window.bind("<MouseWheel>", self.scrolldownup)                 # Bind mouse wheel scroll event to the scrolldown function
 
-    def resize(self, event):                                                # Resize function to adjust the canvas size when the window is resized
-        self.canvas.pack()                                                  # Update the canvas size to match the new window size
+        self.emoji_images = {}                                              # Dictionary to store emoji images
+        self.emoji_folder = os.path.join(os.path.dirname(__file__), "openmoji", "png", "72x72") # Path to folder containing emoji images
 
+    def resize_debounce(self, event):
+        if self.resize_timer:
+            self.window.after_cancel(self.resize_timer)
+        self.resize_timer = self.window.after(100, self.resize)
+
+    def resize(self):                                                       # Resize function to adjust the canvas size when the window is resized
+        self.canvas.pack()                                                  # Update the canvas size to match the new window size
         WIDTH = self.canvas.winfo_width()
 
         if self.text is not None:                                           # If there is text loaded, redraw the layout
             self.canvas.delete("all")                                       # Clear the canvas
             new_disp = self.layout(self.text)                               # Redraw the layout when the window is resized
             self.draw(new_disp)                                             # Redraw the display list on the canvas
+
+        self.resize_timer = None
 
     def lex(self, body):                                                    # Lexical analysis (modified show function) to extract text from HTML content
         text = ""
@@ -145,6 +156,26 @@ class Browser:
         display = self.layout(self.text)                                    # Call the layout function to get the display list
         self.draw(display)                                                  # Draw the layout on the canvas
 
+    def is_emoji(self, c):
+        # Check if the character is an emoji
+        return ord(c) >= 0x1F300 and ord(c) <= 0x1F5FF or ord(c) >= 0x1F600 and ord(c) <= 0x1F64F or ord(c) >= 0x1F680 and ord(c) <= 0x1F6FF or ord(c) >= 0x1F700 and ord(c) <= 0x1F77F 
+
+    def get_emoji_image(self, c):
+        codepoint = f"{ord(c):X}".upper()                                   # Get the Unicode codepoint of the emoji character
+        filename = os.path.join(self.emoji_folder, f"{codepoint}.png")      # Construct the filename based on the codepoint
+
+        if not os.path.exists(filename):                                    # Check if the emoji image file exists
+            return None                                                     # If the file does not exist, return None
+        
+        if filename not in self.emoji_images:                               # If the emoji image is not already loaded
+            try:
+                image = tk.PhotoImage(filename).subsample(5, 5)             # Resize 72x72 to 14x14 
+                self.emoji_images[filename] = image                         # Store the loaded image in the dictionary
+                return self.emoji_images[filename]                          # Return the loaded image
+            except Exception as e:
+                print(f"Error loading emoji {c}: {e}")                      # Print an error message if there is an issue loading the image
+                return None
+            
     # Key concepts reviewed in this example code: inheritance, encapsulation, and polymorphism.
     def layout(self, text):
         #self.canvas.create_rectangle(10, 20, 400, 300)
@@ -153,13 +184,13 @@ class Browser:
 
         global H_Step, V_Step
 
-        self.display_list = []  # Clear previous layout
+        self.display_list = []                                              # Clear previous layout
 
         H_Step, V_Step = 13, 18
         cursor_x, cursor_y = H_Step, V_Step
         
         #self.window.update_idletasks()                                     # Update the window to ensure the canvas is ready for drawing
-        canvas_width = self.canvas.winfo_width()                           # Use actual canvas width
+        canvas_width = self.canvas.winfo_width()                            # Use actual canvas width
         scrollbar_width = self.scrollbar.winfo_width()
         current_width = canvas_width - scrollbar_width
         
@@ -167,8 +198,12 @@ class Browser:
             current_width = WIDTH - scrollbar_width
 
         for c in text:
-            self.display_list.append((cursor_x, cursor_y, c))
-            cursor_x += H_Step                                              # Allow the print to be able to move to next space to print character so they don't overlap
+            if self.is_emoji(c):                                            # If the character is an emoji
+                self.display_list.append(("emoji", cursor_x, cursor_y, c))  # Append the emoji image to the display list
+                cursor_x += 14                                              # Width of the emoji
+            else:
+                self.display_list.append((cursor_x, cursor_y, c))
+                cursor_x += H_Step                                              # Allow the print to be able to move to next space to print character so they don't overlap
 
             if c == "\n":                                                   # If the character is a newline, move to the next line
                 cursor_y += V_Step + 1                                      # Additional space added to vertical step when there is a newline char to give illusion of paragraph break
@@ -183,11 +218,21 @@ class Browser:
     
     def draw (self, display_list):
         #current_height = self.canvas.winfo_height()                         # Get the current height of the canvas
+        #if y > self.scroll + current_height: continue                   # If the y position is below the visible area, skip drawing this character
+        #if y + V_Step < self.scroll: continue                           # If the y position plus the vertical step is above the visible area, skip drawing this character
+
         self.canvas.delete("all")                                           # Clear the canvas before drawing new elements
-        for x, y, c in display_list:
-            #if y > self.scroll + current_height: continue                   # If the y position is below the visible area, skip drawing this character
-            #if y + V_Step < self.scroll: continue                           # If the y position plus the vertical step is above the visible area, skip drawing this character
-            self.canvas.create_text(x, y, text=c, font=("Arial", 12))
+        for item in display_list:
+            if len(item) == 4 and item[0] == "emoji":          # If the item is an emoji
+                type, x, y, c = item
+                image = self.get_emoji_image(c)                               # Get the emoji image
+                if image:
+                    self.canvas.create_image(x, y, image=image, anchor="nw")  # Draw the emoji image on the canvas
+                else:
+                    self.canvas.create_text(x, y, text="(Cannot find image)", font=("Arial", 12))  # If the emoji image is not available, draw the character as text
+            else:
+                x, y, c = item
+                self.canvas.create_text(x, y, text=c, font=("Arial", 12))
 
         bbox = self.canvas.bbox("all")                                      # Get the bounding box of all drawn elements
         if bbox:
@@ -196,7 +241,7 @@ class Browser:
             self.canvas.config(scrollregion=(x0, y0, x1, y1))               # Update the scroll region of the canvas to encompass all drawn elements
         else:
             self.canvas.config(scrollregion=(0, 0, WIDTH, HEIGHT))          # If no elements are drawn, set the scroll region to the initial size of the canvas
-    
+
     def scrolldownup(self, event):
         if event.delta < 0:                                                 # If scrolling down
             self.canvas.yview_scroll(1, "units")                            # Scroll down by one unit
